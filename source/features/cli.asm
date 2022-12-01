@@ -4,6 +4,8 @@
 ;
 ; COMMAND LINE INTERFACE
 ; ==================================================================
+; IF AX=0x1234 THEN THE FIRST COMMAND WILL BE EXECUTED NOT FROM
+; USER INPUT BUT FROM SI REGISTER
 
 
 os_command_line:
