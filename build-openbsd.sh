@@ -33,8 +33,14 @@ nasm -O0 -w+orphan-labels -f bin -o source/bootload/bootload.bin source/bootload
 echo ">>> Assembling MikeOS kernel..."
 
 cd source
-nasm -O0 -w+orphan-labels -f bin -o kernel.bin kernel.asm || exit
+nasm -O0 -w+orphan-labels -f bin -o mikeos.sys kernel.asm || exit
 cd ..
+
+echo ">>> Assembling MikeOS Shell..."
+
+cd source/shell
+nasm -O0 -w+orphan-labels -f bin -o mikesh.sys mikesh.asm || exit
+cd ../..
 
 
 echo ">>> Assembling programs..."
@@ -59,7 +65,8 @@ echo ">>> Copying MikeOS kernel and programs..."
 rm -rf tmp-loop
 vnconfig vnd3 disk_images/mikeos.flp || exit
 
-mkdir tmp-loop && mount -t msdos /dev/vnd3c tmp-loop && cp source/kernel.bin tmp-loop/
+mkdir tmp-loop && mount -t msdos /dev/vnd3c tmp-loop && cp source/mikeos.sys tmp-loop/
+cp source/shell/mikesh.sys tmp-loop/
 
 cp programs/*.bin programs/*.bas programs/sample.pcx tmp-loop
 

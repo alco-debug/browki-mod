@@ -3,7 +3,7 @@
 ; Copyright (C) 2006 - 2019 MikeOS Developers -- see doc/LICENSE.TXT
 ;
 ; Based on a free boot loader by E Dehling. It scans the FAT12
-; floppy for KERNEL.BIN (the MikeOS kernel), loads it and executes it.
+; floppy for MIKEOS.SYS (the MikeOS kernel), loads it and executes it.
 ; This must grow no larger than 512 bytes (one sector), with the final
 ; two bytes being the boot signature (AA55h). Note that in FAT12,
 ; a cluster is the same as a sector: 512 bytes.
@@ -333,10 +333,10 @@ l2hts:			; Calculate head, track and sector settings for int 13h
 ; ------------------------------------------------------------------
 ; STRINGS AND VARIABLES
 
-	kern_filename	db "KERNEL  BIN"	; MikeOS kernel filename
+	kern_filename	db "MIKEOS  SYS"	; MikeOS kernel filename
 
 	disk_error	db "Floppy error! Press any key...", 0
-	file_not_found	db "KERNEL.BIN not found!", 0
+	file_not_found	db "MIKEOS.SYS not found!", 0
 
 	bootdev		db 0 	; Boot device number
 	cluster		dw 0 	; Cluster of the file we want to load

@@ -5,6 +5,8 @@
 ; FAT12 FLOPPY DISK ROUTINES (V4.6.2a6)
 ; ==================================================================
 
+ParaPerEntry equ 2
+
 ; ------------------------------------------------------------------
 ; os_get_file_list -- Generate comma-separated string of files on disk
 ; IN: AX = location to store zero-terminated filename string,

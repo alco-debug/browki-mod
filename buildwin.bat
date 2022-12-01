@@ -8,7 +8,12 @@ nasm -O0 -f bin -o bootload.bin bootload.asm
 cd ..
 
 echo Assembling MikeOS kernel...
-nasm -O0 -f bin -o kernel.bin kernel.asm
+nasm -O0 -f bin -o mikeos.sys kernel.asm
+
+cd shell
+echo Assembling MikeOS Shell...
+nasm -O0 -f bin -o mikesh.sys mikesh.asm
+cd ..
 
 echo Assembling programs...
 cd ..\programs
@@ -26,7 +31,8 @@ echo Mounting disk image...
 imdisk -a -f disk_images\mikeos.flp -s 1440K -m B:
 
 echo Copying kernel and applications to disk image...
-copy source\kernel.bin b:\
+copy source\mikeos.sys b:\
+copy source\\shell\mikesh.sys b:\
 copy programs\*.bin b:\
 copy programs\sample.pcx b:\
 copy programs\*.bas b:\

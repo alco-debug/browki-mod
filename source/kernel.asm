@@ -22,6 +22,8 @@
 	; because external programs load after it at the 32K point:
 
 	disk_buffer	equ	24576
+	LoadShellAt	equ	23552
+	MaxShellSize	equ	disk_buffer - LoadShellAt
 
 
 ; ------------------------------------------------------------------
@@ -105,6 +107,8 @@ os_call_vectors:
 	jmp os_port_byte_in		; 00CCh
 	jmp os_string_tokenize		; 00CFh
         jmp os_string_to_long_int       ; 00D2h
+	times 300 db 0
+	jmp disk_read_root_dir		; 01FBh
 
 
 ; ------------------------------------------------------------------
@@ -172,7 +176,31 @@ no_autorun_bin:
 	mov si, autorun_bas_command	; Move the autorun.bas execution command to SI
 
 shell:
-	call os_command_line		; Run the command line
+	call os_clear_screen
+
+	mov ax, shell_file_name
+	call os_get_file_size
+	jc no_shell			; No file if carry, so...
+
+	cmp ebx, MaxShellSize
+	ja no_shell			; If shell executable is too large, no shell, too
+
+	mov cx, LoadShellAt
+	call os_load_file
+
+	mov ax, 0
+	mov bx, 0
+	mov cx, 0
+	mov dx, 0
+	mov si, 0
+	mov di, 0
+
+	call LoadShellAt
+
+	jmp shell
+no_shell:
+	mov si, no_shell_msg
+	call os_print_string
 	cli
 	hlt
 
@@ -200,12 +228,13 @@ execute_bin_program:
 
         autorun_bin_file_name   db 'AUTORUN.BIN', 0
         autorun_bas_file_name   db 'AUTORUN.BAS', 0
+	shell_file_name		db 'MIKESH.SYS', 0
 
         bin_ext                 db 'BIN'
         bas_ext                 db 'BAS'
 
 	autorun_bas_command	db 'BASIC AUTORUN.BAS', 0
-
+	no_shell_msg		db 'MIKESH.SYS NOT FOUND -- CANNOT PROCEED!'
         program_finished_msg    db '>>> Program finished -- press a key to continue...', 0
 
 

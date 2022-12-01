@@ -75,9 +75,14 @@ nasm_version_check "$current_nasm_version" "$MINIMUM_NASM_VERSION"
 echo "[okay] assembled bootloader"
 
 cd source
-"$NASM_PATH" -O0 -f bin -o kernel.bin kernel.asm || exit 1
+"$NASM_PATH" -O0 -f bin -o mikeos.sys kernel.asm || exit 1
 echo "[okay] assembled kernel"
 cd ..
+
+cd source/shell
+"$NASM_PATH" -O0 -f bin -o mikesh.sys mikesh.asm || exit 1
+echo "[okay] assembled shell"
+cd ../..
 
 cd programs
 for i in *.asm; do
@@ -102,7 +107,7 @@ dev=$(echo -n $(hdid -nobrowse -nomount disk_images/mikeos.dmg))
 mount -t msdos "$dev" "$tmp_file"
 [ $? -ne 0 ] && echo "[halt] could not mount "$dev"" >&2 && exit 1
 
-cp source/kernel.bin "$tmp_file/"
+cp source/mikeos.sys "$tmp_file/"
 cp programs/*.bin programs/*.bas programs/sample.pcx "$tmp_file"
 echo "[okay] added programs to image"
 
