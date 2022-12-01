@@ -9,19 +9,32 @@
 os_command_line:
 	call os_clear_screen
 
+	push si				; Preserve SI
+
 	mov si, version_msg
 	call os_print_string
 	mov si, help_text
 	call os_print_string
-
 
 get_cmd:				; Main processing loop
 	mov di, command			; Clear single command buffer
 	mov cx, 32
 	rep stosb
 
-	mov si, prompt			; Main loop; prompt for input
+	cmp ax, 1234h
+	jne .from_keyboard
+
+.from_si:
+	pop si				; Pop original SI
+	mov di, input
+	call os_string_copy
+	jmp command_exec
+
+.from_keyboard:
+	pop si				; Pop for the purpose of not garbaging the stack
+	mov si, prompt
 	call os_print_string
+
 
 	mov ax, input			; Get command string from user
 	mov bx, 64
@@ -36,6 +49,7 @@ get_cmd:				; Main processing loop
 	cmp byte [si], 0
 	je get_cmd
 
+command_exec:
 	mov si, input			; Separate out the individual command
 	mov al, ' '
 	call os_string_tokenize
@@ -163,6 +177,8 @@ execute_bin:
 	mov di, 0
 
 	call 32768			; Call the external program
+
+	call os_print_newline
 
 	jmp get_cmd			; When program has finished, start again
 

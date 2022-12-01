@@ -166,11 +166,10 @@ no_autorun_bin:
 	call os_file_exists
 	jc shell			; Skip next section if AUTORUN.BAS doesn't exist
 
-	mov cx, 32768			; Otherwise load the program into RAM
-	call os_load_file
 	call os_clear_screen
-	mov ax, 32768
-	call os_run_basic		; Run the BASIC interpreter
+
+	mov ax, 1234h			; Tell the command line that the command in SI is present
+	mov si, autorun_bas_command	; Move the autorun.bas execution command to SI
 
 shell:
 	call os_command_line		; Run the command line
@@ -204,6 +203,8 @@ execute_bin_program:
 
         bin_ext                 db 'BIN'
         bas_ext                 db 'BAS'
+
+	autorun_bas_command	db 'BASIC AUTORUN.BAS', 0
 
         program_finished_msg    db '>>> Program finished -- press a key to continue...', 0
 
