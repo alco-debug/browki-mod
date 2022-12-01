@@ -1,6 +1,6 @@
 ; ==================================================================
 ; MikeOS -- The Mike Operating System kernel
-; Copyright (C) 2006 - 2019 MikeOS Developers -- see doc/LICENSE.TXT
+; Copyright (C) 2006 - 2021 MikeOS Developers -- see doc/LICENSE.TXT
 ;
 ; MATH ROUTINES
 ; ==================================================================
@@ -59,16 +59,18 @@ os_get_random:
 	ret
 
 
+; linear congruent method -- X1 = (X0 * a + b) mod m, m = 65536
+; best if a and b are large, positive prime numbers
 .generate_random:
 	push dx
-	push bx
 
 	mov ax, [os_random_seed]
-	mov dx, 0x7383			; The magic number (random.org)
+	mov dx, 23167
 	mul dx				; DX:AX = AX * DX
+	add ax, 12409
+	adc dx, 0
 	mov [os_random_seed], ax
 
-	pop bx
  	pop dx
 	ret
 

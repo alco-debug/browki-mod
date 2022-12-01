@@ -1,147 +1,167 @@
 ; ==================================================================
 ; MikeOS -- The Mike Operating System kernel
-; Copyright (C) 2006 - 2019 MikeOS Developers -- see doc/LICENSE.TXT
+; Copyright (C) 2006 - 2021 MikeOS Developers -- see doc/LICENSE.TXT
 ;
-; FAT12 FLOPPY DISK ROUTINES
+; FAT12 FLOPPY DISK ROUTINES (V4.6.2a6)
 ; ==================================================================
 
 ; ------------------------------------------------------------------
-; os_get_file_list -- Generate comma-separated string of files on floppy
-; IN/OUT: AX = location to store zero-terminated filename string
+; os_get_file_list -- Generate comma-separated string of files on disk
+; IN: AX = location to store zero-terminated filename string,
+;     BX = max length of filename string (2 b to 32 K)
+; OUT: AX = location where zero-terminated filename string was placed
+;      errno and CY set on error
 
 os_get_file_list:
+	push ds
+	push es
 	pusha
+	mov bx, 1024			; disable name buffer overrun check
 
-	mov word [.file_list_tmp], ax
+	mov [.file_list_tmp], ax	; save location and size
+	dec bx
+	mov [.count_tmp], bx		; max count, leave 1 for terminator
+	inc bx
 
-	mov eax, 0			; Needed for some older BIOSes
+	cmp bx, 1			; initialize array
+	jg .cont1			; read directory error will return
+	mov bx, 1			; return an 'empty' array
+  .cont1:
+	mov cx, bx
+	mov di, ax			; set entire array to terminator
+	mov al, 0
+	rep stosb
 
-	call disk_reset_floppy		; Just in case disk was changed
-
-	mov ax, 19			; Root dir starts at logical sector 19
-	call disk_convert_l2hts
-
-	mov si, disk_buffer		; ES:BX should point to our buffer
-	mov bx, si
-
-	mov ah, 2			; Params for int 13h: read floppy sectors
-	mov al, 14			; And read 14 of them
-
-	pusha				; Prepare to enter loop
-
-
-.read_root_dir:
-	popa
-	pusha
-
+	cmp bx, 2			; need room for at least 1 char + terminator
+	jge .cont2			; also limit max to 32K
+  .error:
+	mov cx, 0x30c			; Not enough space
 	stc
-	int 13h				; Read sectors
-	call disk_reset_floppy		; Check we've read them OK
-	jnc .show_dir_init		; No errors, continue
+	jmp short .done
 
-	call disk_reset_floppy		; Error = reset controller and try again
-	jnc .read_root_dir
-	jmp .done			; Double error, exit 'dir' routine
+  .cont2:
+	call disk_read_root_dir		; get root directory in system designated buffer
+	mov bx, disk_buffer		; Set ES:BX to point to OS buffer
+	push cs
+	pop es
+	jnc .show_dir_init		; ES:BX points to root buffer start
+	jmp short .done2		; errno = read error, CY set
 
-.show_dir_init:
-	popa
-
-	mov ax, 0
-	mov si, disk_buffer		; Data reader from start of filenames
-
-	mov word di, [.file_list_tmp]	; Name destination buffer
-
-
-.start_entry:
-	mov al, [si+11]			; File attributes for entry
-	cmp al, 0Fh			; Windows marker, skip it
-	je .skip
-
-	test al, 18h			; Is this a directory entry or volume label?
-	jnz .skip			; Yes, ignore it
-
-	mov al, [si]
-	cmp al, 229			; If we read 229 = deleted filename
-	je .skip
-
-	cmp al, 0			; 1st byte = entry never used
-	je .done
-
-
-	mov cx, 1			; Set char counter
-	mov dx, si			; Beginning of possible entry
-
-.testdirentry:
-	inc si
-	mov al, [si]			; Test for most unusable characters
-	cmp al, ' '			; Windows sometimes puts 0 (UTF-8) or 0FFh
-	jl .nxtdirentry
-	cmp al, '~'
-	ja .nxtdirentry
-
-	inc cx
-	cmp cx, 11			; Done 11 char filename?
-	je .gotfilename
-	jmp .testdirentry
-
-
-.gotfilename:				; Got a filename that passes testing
-	mov si, dx			; DX = where getting string
-
-	mov cx, 0
-.loopy:
-	mov byte al, [si]
-	cmp al, ' '
-	je .ignore_space
-	mov byte [di], al
-	inc si
-	inc di
-	inc cx
-	cmp cx, 8
-	je .add_dot
-	cmp cx, 11
-	je .done_copy
-	jmp .loopy
-
-.ignore_space:
-	inc si
-	inc cx
-	cmp cx, 8
-	je .add_dot
-	jmp .loopy
-
-.add_dot:
-	mov byte [di], '.'
-	inc di
-	jmp .loopy
-
-.done_copy:
-	mov byte [di], ','		; Use comma to separate filenames
-	inc di
-
-.nxtdirentry:
-	mov si, dx			; Start of entry, pretend to skip to next
-
-.skip:
-	add si, 32			; Shift to next 32 bytes (next filename)
-	jmp .start_entry
-
-
-.done:
-	dec di
-	mov byte [di], 0		; Zero-terminate string (gets rid of final comma)
-
-	popa
+  .fine:
+	xor cx, cx
+	clc				; directory read o.k., at least one byte in buffer
+  .done:
+;	mov [errno], cx
+  .done2:
+	popa				; initialize array is automatically terminated
+	pop es
+	pop ds
 	ret
 
 
-	.file_list_tmp		dw 0
+  .show_dir_init:
+	mov di, [.file_list_tmp]	; Name destination buffer
+	xor bp, bp			; Save count to determine if this is first name (no comma)
+
+	push es				; reverse segment pointers
+	push ds
+	pop es				; ES = program seg
+	pop ds				; DS = directory seg
+
+  .start_entry:
+	mov si, bx			; maintain starting offset for easy computation
+	mov al, [si+11]			; File attributes for entry
+	cmp al, 0Fh			; LFN marker, skip it
+	je .next_entry
+
+	test al, 18h			; Is this a directory entry or volume label?
+	jnz .next_entry			; Yes, ignore it
+
+	lodsb				; First name char (inc SI)
+	cmp al, 229			; If we read 229 (e5h) = deleted filename
+	je .next_entry			;   05 also used by a few OS
+
+	cmp al, 0			; 1st byte 0 => entry never used
+					; (should be unused here to end of directory)
+	je .fine
+
+  .testdirentry:
+	cmp al, ' '			; Windows sometimes puts 0 (UTF-8) or 0FFh
+	jle .next_entry			; 1st char cannot be space
+	cmp al, '~'
+	ja .next_entry
+
+  .gotfilename:				; Got a filename that passes testing
+					; (AL contains 1st, SI points to 2nd char)
+	cmp bp, 0			; 1st entry?
+	je .set_name			; yes, no comma
+	push ax
+	mov al, ','			; separate entries with ',' (not wanted before first)
+	stosb
+	pop ax
+	dec word [es:.count_tmp]
+	jle .fine			; exhausted count, exit with partial last entry
+
+  .set_name:
+	inc bp				; Count entry
+	mov cx, 1			; Count filename char to know when to stop
+  .loopy:
+	stosb				; char
+	dec word [es:.count_tmp]
+	jle .fine			; exhausted count, exit with partial last entry
+	cmp cx, 8
+	je .q_add_dot
+
+	lodsb				; next char from high buffer
+	inc cx
+	cmp al, ' '
+	je .q_add_dot
+	jmp .loopy			; store char and check array overrun
+
+  .next_entry:
+	mov ax, ds
+	add ax, ParaPerEntry		; point to beginning of next entry
+	mov ds, ax
+	jmp .start_entry
+
+  .q_add_dot:
+	mov cx, 8			; move pointer and count to current entry extension
+	mov si, bx
+	add si, cx
+
+	lodsb
+	cmp al, ' '			; extension?
+	je .next_entry			; no
+
+	push ax				; add dot, begin extension transfer
+	mov al, '.'
+	stosb
+	pop ax
+	dec word [es:.count_tmp]
+	jle .fine			; exhausted count, exit with partial last entry
+
+  .dot_loop:
+	stosb				; char
+	inc cx
+	dec word [es:.count_tmp]
+	jle .fine			; exhausted count, exit with partial last entry
+	cmp cx, 11
+	je .next_entry			; finished this name (3 char extension)
+
+	lodsb
+	cmp al, ' '			; more extension?
+	jne .dot_loop 			; yes
+	jmp .next_entry			; (< 3 char extension is o.k.)
+
+
+	.file_list_tmp		dw 0	; list string pointer
+	.count_tmp		dw 0	; max size string buffer
 
 
 ; ------------------------------------------------------------------
 ; os_load_file -- Load file into RAM
 ; IN: AX = location of filename, CX = location in RAM to load file
-; OUT: BX = file size (in bytes), carry set if file not found
+; OUT: EBX = file size (in bytes), carry set if file not found
 
 os_load_file:
 	call os_string_uppercase
@@ -226,14 +246,14 @@ os_load_file:
 	loop .next_root_entry
 
 .root_problem:
-	mov bx, 0			; If file not found or major disk error,
+	mov ebx, 0			; If file not found or major disk error,
 	stc				; return with size = 0 and carry set
 	ret
 
 
 .found_file_to_load:			; Now fetch cluster and load FAT into RAM
-	mov ax, [di+28]			; Store file size to return to calling routine
-	mov word [.file_size], ax
+	mov eax, [di+28]		; Store file size to return to calling routine
+	mov dword [.file_size], eax
 
 	cmp ax, 0			; If the file size is zero, don't bother trying
 	je .end				; to read more clusters
@@ -327,7 +347,7 @@ os_load_file:
 
 
 .end:
-	mov bx, [.file_size]		; Get file size to pass back in BX
+	mov ebx, [.file_size]		; Get file size to pass back in BX
 	clc				; Carry clear = good load
 	ret
 
@@ -338,7 +358,7 @@ os_load_file:
 
 	.filename_loc	dw 0		; Temporary store of filename location
 	.load_position	dw 0		; Where we'll load the file
-	.file_size	dw 0		; Size of the file
+	.file_size	dd 0		; Size of the file
 
 	.string_buff	times 12 db 0	; For size (integer) printing
 
@@ -353,22 +373,14 @@ os_load_file:
 os_write_file:
 	pusha
 
-	mov si, ax
-	call os_string_length
-	cmp ax, 0
-	je near .failure
-	mov ax, si
-
-	call os_string_uppercase
-	call int_filename_convert	; Make filename FAT12-style
-	jc near .failure
-
 	mov word [.filesize], cx
 	mov word [.location], bx
-	mov word [.filename], ax
+	mov word [.filename], ax	; original name pointer for 'create file'
 
 	call os_file_exists		; Don't overwrite a file if it exists!
-	jnc near .failure
+					; does name conversion and checks name size
+					; returns not found (CY) if error or not found
+	jnc near .failure		; DOS formatted name found in root directory
 
 
 	; First, zero out the .free_clusters list from any previous execution
@@ -411,6 +423,7 @@ os_write_file:
 	je near .finished
 
 	call disk_read_fat		; Get FAT copy into RAM
+	jc near .failure		; Read error, jump out
 	mov si, disk_buffer + 3		; And point SI at it (skipping first two clusters)
 
 	mov bx, 2			; Current cluster counter
@@ -567,7 +580,7 @@ os_write_file:
 	mov word [ds:si], ax
 
 	call disk_write_fat		; Save our FAT back to disk
-
+	jc near .failure		; Write error, jump out
 
 	; Now it's time to save the sectors to disk!
 
@@ -608,21 +621,28 @@ os_write_file:
 	; entry and update it with the cluster in use and file size
 
 	call disk_read_root_dir
+	jc near .failure		; Read error, goto error exit
 
 	mov word ax, [.filename]
+	call int_filename_convert	; Make FAT12-style filename, modifies AX
 	call disk_get_root_entry
 
-	mov word ax, [.free_clusters]	; Get first free cluster
+	or byte [di+11], 0x20		; Ensure 'archive' is set
 
-	mov word [di+26], ax		; Save cluster location into root dir entry
+	call sys_disk_time		; Update time of last write
+	call sys_disk_date		;  and date
+	mov [di+22], cx			; time (now)
+	mov [di+24], dx			; date (today)
 
-	mov word cx, [.filesize]
+	mov word ax, [.free_clusters]	; Get first file cluster from list
+	mov word [di+26], ax		; Save starting location into root dir entry
+
+	mov word cx, [.filesize]	; Update file size (low)
 	mov word [di+28], cx
-
-	mov byte [di+30], 0		; File size
-	mov byte [di+31], 0
+	mov word [di+30], 0		; File size (high)
 
 	call disk_write_root_dir
+	jc near .failure		; Write error, jump out
 
 .finished:
 	popa
@@ -649,32 +669,31 @@ os_write_file:
 
 ; --------------------------------------------------------------------------
 ; os_file_exists -- Check for presence of file on the floppy
-; IN: AX = filename location; OUT: carry clear if found, set if not
+; IN: AX = filename location
+; OUT: carry clear if found, set if not; registers, except ES, preserved
 
 os_file_exists:
-	call os_string_uppercase
-	call int_filename_convert	; Make FAT12-style filename
+	pusha
 
-	push ax
-	call os_string_length
-	cmp ax, 0
-	je .failure
-	pop ax
+	call int_filename_convert	; Make FAT12-style filename, modifies AX
+	jc .failure			; bad conversion, includes 0 or too many characters
 
-	push ax
-	call disk_read_root_dir
+	call disk_read_root_dir		; sets es = ds, root in es:disk_buffer, other reg preserved
+	jc .failure
 
-	pop ax				; Restore filename
-
-	mov di, disk_buffer
+;	push ds				; not needed, yet
+;	pop es
+;	mov di, disk_buffer		; ES:DS -> root buffer
 
 	call disk_get_root_entry	; Set or clear carry flag
+					; ES:DI points to table entry (if exists)
 
+	popa
 	ret
 
 .failure:
-	pop ax
 	stc
+	popa
 	ret
 
 
@@ -683,20 +702,18 @@ os_file_exists:
 ; IN: AX = location of filename; OUT: Nothing
 
 os_create_file:
-	clc
-
-	call os_string_uppercase
-	call int_filename_convert	; Make FAT12-style filename
 	pusha
-
-	push ax				; Save filename for now
 
 	call os_file_exists		; Does the file already exist?
 	jnc .exists_error
 
+	call int_filename_convert	; Make FAT12-style filename
+	push ax				; Save converted filename
 
 	; Root dir already read into disk_buffer by os_file_exists
 
+;	push ds				; not needed, yet
+;	pop es
 	mov di, disk_buffer		; So point DI at it!
 
 
@@ -723,31 +740,24 @@ os_create_file:
 	mov cx, 11
 	rep movsb			; And copy it into RAM copy of root dir (in DI)
 
-
 	sub di, 11			; Back to start of root dir entry, for clarity
 
+	call sys_disk_time		; CX = time in directory format
+	call sys_disk_date		; DX = date in directory format
+	xor ax, ax
 
-	mov byte [di+11], 0		; Attributes
-	mov byte [di+12], 0		; Reserved
-	mov byte [di+13], 0		; Reserved
-	mov byte [di+14], 0C6h		; Creation time
-	mov byte [di+15], 07Eh		; Creation time
-	mov byte [di+16], 0		; Creation date
-	mov byte [di+17], 0		; Creation date
-	mov byte [di+18], 0		; Last access date
-	mov byte [di+19], 0		; Last access date
-	mov byte [di+20], 0		; Ignore in FAT12
-	mov byte [di+21], 0		; Ignore in FAT12
-	mov byte [di+22], 0C6h		; Last write time
-	mov byte [di+23], 07Eh		; Last write time
-	mov byte [di+24], 0		; Last write date
-	mov byte [di+25], 0		; Last write date
-	mov byte [di+26], 0		; First logical cluster
-	mov byte [di+27], 0		; First logical cluster
-	mov byte [di+28], 0		; File size
-	mov byte [di+29], 0		; File size
-	mov byte [di+30], 0		; File size
-	mov byte [di+31], 0		; File size
+	mov byte [di+11], 0x20		; Attributes (set archive)
+	mov byte [di+12], al		; Reserved
+	mov byte [di+13], al		; Reserved
+	mov [di+14], cx			; Creation time (now)
+	mov [di+16], dx			; Creation date (today)
+	mov [di+18], ax			; Last access date (not used)
+	mov [di+20], ax			; Ignore in FAT12/16 (FAT-32 high cluster)
+	mov [di+22], cx			; Last write time (now)
+	mov [di+24], dx			; Last write date (today)
+	mov [di+26], ax			; First logical cluster (FAT-32 low word)
+	mov [di+28], ax			; File size (low)
+	mov [di+30], ax			; File size (high) -- before write size = 0
 
 	call disk_write_root_dir
 	jc .failure
@@ -920,7 +930,7 @@ os_rename_file:
 
 ; --------------------------------------------------------------------------
 ; os_get_file_size -- Get file size information for specified file
-; IN: AX = filename; OUT: BX = file size in bytes (up to 64K)
+; IN: AX = filename; OUT: EBX = file size in bytes (up to 4 Gb)
 ; or carry set if file not found
 
 os_get_file_size:
@@ -943,13 +953,13 @@ os_get_file_size:
 	call disk_get_root_entry
 	jc .failure
 
-	mov word bx, [di+28]
+	mov dword ebx, [di+28]
 
-	mov word [.tmp], bx
+	mov dword [.tmp], ebx
 
 	popa
 
-	mov word bx, [.tmp]
+	mov dword ebx, [.tmp]
 
 	ret
 
@@ -959,91 +969,100 @@ os_get_file_size:
 	ret
 
 
-	.tmp	dw 0
+	.tmp	dd 0
 
 
 ; ==================================================================
 ; INTERNAL OS ROUTINES -- Not accessible to user programs
 
-; ------------------------------------------------------------------
-; int_filename_convert -- Change 'TEST.BIN' into 'TEST    BIN' as per FAT12
+; ----------------------------------------------------------------------------
+; intern_filename_convert -- Change 'TEST.BIN' into 'TEST    BIN',
+; 'TEST.1' into 'TEST    1  ' or 'TEST' into 'TEST       '. (as per DOS 8.3)
+; extension is optional, but must be at least 1 char if dot
 ; IN: AX = filename string
-; OUT: AX = location of converted string (carry set if invalid)
+; OUT: AX = location of converted string (0000 and carry set if invalid)
 
+intern_filename_convert:
 int_filename_convert:
+	push es
 	pusha
 
-	mov si, ax
+	push ds				; ES = DS = program segment
+	pop es
+
+	call os_string_uppercase	; 8.3 disk names are upper case only
+	mov si, ax			; save for conversion
 
 	call os_string_length
-	cmp ax, 14			; Filename too long?
+	cmp ax, 12			; Filename too long? (8.3 => 11 + dot, max.)
 	jg .failure			; Fail if so
 
 	cmp ax, 0
-	je .failure			; Similarly, fail if zero-char string
+	jle .failure			; Similarly, fail if zero-char (or negative) string
 
 	mov dx, ax			; Store string length for now
 
+	mov al, ' '			; set output to all spaces with terminator
 	mov di, .dest_string
+	push di
+	mov cx, 11
+	rep stosb
+	mov al, 0
+	stosb
+	pop di
 
-	mov cx, 0
-.copy_loop:
+	xor cx, cx			; number of characters processed (at least 1)
+  .copy_loop:
 	lodsb
 	cmp al, '.'
 	je .extension_found
 	stosb
 	inc cx
 	cmp cx, dx
-	jg .failure			; No extension found = wrong
-	jmp .copy_loop
+	jl .copy_loop
+	jmp short .done			; No extension found - already padded and terminated
 
-.extension_found:
+  .extension_found:
 	cmp cx, 0
 	je .failure			; Fail if extension dot is first char
 
 	cmp cx, 8
-	je .do_extension		; Skip spaces if first bit is 8 chars
+	jg .failure			; first part is 8 chars max.
 
-	; Now it's time to pad out the rest of the first part of the filename
-	; with spaces, if necessary
+	; Output string was padded above, now adjust pointer and process extension
 
-.add_spaces:
-	mov byte [di], ' '
-	inc di
-	inc cx
-	cmp cx, 8
-	jl .add_spaces
+  .do_extension:
+	mov di, .dest_string+8
 
-	; Finally, copy over the extension
-.do_extension:
-	lodsb				; 3 characters
+	lodsb				; 1-3 characters (unroll the loop)
 	cmp al, 0
-	je .failure
+	je .failure			; must have at least one char if a dot
 	stosb
-	lodsb
+	lodsb				; extension 2nd char
 	cmp al, 0
-	je .failure
+	je .done
 	stosb
-	lodsb
+	lodsb				; extension 3rd char
 	cmp al, 0
-	je .failure
+	je .done
 	stosb
 
-	mov byte [di], 0		; Zero-terminate filename
-
+  .done:
 	popa
+	pop es
 	mov ax, .dest_string
 	clc				; Clear carry for success
 	ret
 
 
-.failure:
+  .failure:
 	popa
+	pop es
+	xor ax, ax			; pointer = null
 	stc				; Set carry for failure
 	ret
 
-
-	.dest_string	times 13 db 0
+	.dest_string:	times 12 db 0	; 8 + 3 + terminator
 
 
 ; --------------------------------------------------------------------------
@@ -1310,6 +1329,105 @@ disk_convert_l2hts:
 	ret
 
 
+; ---------------------------------------------------------------------------
+; sys_disk_time -- get system time and convert to disk directory format
+; IN:  nothing
+; OUT: CX time in directory format
+
+sys_disk_time:
+	pusha
+
+	clc				; For buggy BIOSes
+	mov ah, 2			; Get time data from BIOS in BCD format
+	int 1Ah				; CH = hour, CL = minutes, DH = seconds (BCD)
+					; DL = daylight savings flag
+	jnc .fmt
+
+	clc
+	mov ah, 2			; BIOS was updating (~1 in 500 chance), so try again
+	int 1Ah
+	jnc .fmt
+
+	mov cx, 0x0830			; default time = 08:30:30 daylight time
+	mov dx, 0x3001
+
+  .fmt:
+	mov al, ch
+	call os_bcd_to_int		; ax = hours (max = 23, 5 bits)
+	shl ax, 6
+	mov si, ax			; SI = hours with room for minutes
+
+	mov al, cl
+	call os_bcd_to_int		; minutes (max = 59, 6 bits)
+	or si, ax
+	shl si, 5			; SI = hrs + mins with room for secs
+
+	mov al, dh
+	call os_bcd_to_int		; ax = seconds (max = 59)
+	shr ax, 2			; 2 second granularity (5 bits)
+	or si, ax			; SI = hrs + mins + secs/2
+
+	mov [.tmp], si
+	popa
+	mov cx, [.tmp]
+	ret
+
+	.tmp dw 0
+
+
+; ---------------------------------------------------------------------------
+; sys_disk_date -- get system date and convert to disk directory format
+; Note: if checking with Win, MS does something unusual with DST
+; IN:  nothing
+; OUT: DX date in directory format
+
+sys_disk_date:
+	pusha
+
+	clc				; avoid possible bug
+	mov ah, 4			; BIOS get date (most systems)
+	int 1ah
+	jnc .cont			; CH = century, CL = yy, DH = mm, DL = dd (all BCD)
+
+	clc
+	mov ah, 4			; BIOS was updating (~1 in 500 chance), so try again
+	int 1Ah
+	jnc .cont
+
+  .set_default:
+	mov cx, 0x2010			; default date 2010
+	mov dx, 0x0601			; June 1
+
+  .cont:
+	mov al, ch
+	call os_bcd_to_int
+	mov bx, 100			; century * 100 (zero extended)
+	mul bl
+	mov bx, ax
+	mov al, cl
+	call os_bcd_to_int
+	add bx, ax			; full year - base year =
+	sub bx, 1980			; disk year (0 to 127)
+
+	shl bx, 4
+	mov al, dh
+	call os_bcd_to_int
+	or bx, ax			; add month (1 to 12)
+
+	shl bx, 5
+	mov al, dl
+	call os_bcd_to_int
+	or bx, ax			; add day (1 to varies (31 max))
+
+	mov [.tmp], bx
+	popa
+	mov dx, [.tmp]
+	ret
+
+	.tmp dw 0
+
+
+; ---------------------------------------------------------------------------
 	Sides dw 2
 	SecsPerTrack dw 18
 ; ******************************************************************
@@ -1318,5 +1436,4 @@ disk_convert_l2hts:
 
 
 ; ==================================================================
-
 

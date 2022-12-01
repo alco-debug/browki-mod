@@ -18,51 +18,75 @@
 	CODELOC	equ 36864
 
 
-	mov si, helpmsg1		; Print help text
+	mov si, help_msg1		; Print help text
 	call os_print_string
 
-	mov si, helpmsg2
-	call os_print_string
-
-	mov si, helpmsg3
+	mov si, help_msg2
 	call os_print_string
 
 main_loop:
-	mov si, helpmsg4
+	mov si, help_msg3		; Print quick instruction reference
 	call os_print_string
 
-.noinput:
-	call os_print_newline
-
-	mov si, prompt			; Print prompt
+	mov si, main_prompt		; Print prompt
 	call os_print_string
 
-	mov ax, input			; Get hex string
+	mov ax, input			; Get input
 	mov bx, 255
 	call os_input_string
 
-	mov ax, input
+	mov ax, input			; If empty, show prompt again
 	call os_string_length
 	cmp ax, 0
-	je .noinput
+	je main_loop
 
-	mov si, input			; Convert to machine code...
+	mov si, input			; Otherwise, let's check for commands
+	cmp byte [si], 'i'
+	je input_code
+
+	cmp byte [si], 'x'
+	je execute
+
+	cmp byte [si], 'd'
+	je dump_ram
+
+	cmp byte [si], 'p'
+	je poke_byte
+
+	cmp byte [si], 'q'
+	je quit
+
+	jmp main_loop
+
+
+input_code:
+	call os_print_newline
+
+	mov si, code_prompt		; Print prompt
+	call os_print_string
+
+	mov ax, input			; Get input
+	mov bx, 255
+	call os_input_string
+
+	mov ax, input			; If empty, show prompt again
+	call os_string_length
+	cmp ax, 0
+	je main_loop
+
+	mov ax, input
+	call os_string_uppercase	; Otherwise, convert any lowercase hex to uppercase...
+
+	mov si, input			; ... and start converting to machine code...
 	mov di, run
-
 
 .more:
 	cmp byte [si], '$'		; If char in string is '$', end of code
 	je .done
 	cmp byte [si], ' '		; If space, move on to next char
 	je .space
-	cmp byte [si], 'r'		; If 'r' entered, re-run existing code
-	je .runprog
-	cmp byte [si], 'x'		; Or if 'x' entered, return to OS
-	jne .noexit
-	call os_print_newline
-	ret
-.noexit:
-	mov al, [si]
+
+	mov al, [si]			; Otherwise, convert hex
 	and al, 0F0h
 	cmp al, 40h
 	je .H_A_to_F
@@ -106,8 +130,11 @@ main_loop:
 	cld
 	rep movsb
 
+	call os_print_newline
+	jmp main_loop
 
-.runprog:
+
+execute:
 	call os_print_newline
 
 	call CODELOC			; Run program
@@ -117,15 +144,111 @@ main_loop:
 	jmp main_loop
 
 
+
+dump_ram:
+	call os_print_newline
+	mov si, dump_msg1
+	call os_print_string
+
+	mov ax, buffer			; Get starting point of dump
+	mov bx, 16
+	call os_input_string
+
+	mov si, buffer
+	call os_string_to_int
+	mov dx, ax			; Save starting point for later
+
+	call os_print_newline
+	mov si, dump_msg2
+	call os_print_string
+
+	mov ax, buffer			; Get number of bytes to show
+	mov bx, 16
+	call os_input_string
+
+	mov si, buffer
+	call os_string_to_int
+	mov cx, ax			; Set the counter
+
+	call os_print_newline
+
+.loop:
+	mov si, dx			; Starting point
+
+	mov ax, 0			; Zero out the word
+	lodsb
+
+	call os_print_2hex		; ...and show it
+
+	call os_print_space
+
+	inc dx				; Move on to next byte
+
+	dec cx				; Check out counter, and keep looping until zero
+	cmp cx, 0
+	jne .loop
+
+	call os_print_newline
+	jmp main_loop
+
+
+
+poke_byte:
+	call os_print_newline
+	mov si, poke_msg1
+	call os_print_string
+
+	mov ax, buffer			; Get location in RAM
+	mov bx, 16
+	call os_input_string
+
+	mov si, buffer
+	call os_string_to_int
+
+	mov di, ax
+
+	call os_print_newline
+	mov si, poke_msg2
+	call os_print_string
+
+	mov ax, buffer			; Get get value to be poked into the location
+	mov bx, 16
+	call os_input_string
+
+	mov si, buffer
+	call os_string_to_int
+
+	mov byte [di], al
+
+	call os_print_newline
+	jmp main_loop
+
+
+
+quit:
+	call os_print_newline
+	mov si, quit_msg
+	call os_print_string
+	ret
+
+
 	input		times 255 db 0	; Code entered by user (in ASCII)
 	run		times 255 db 0	; Translated machine code to execute
 
-	helpmsg1	db 'MIKEOS MACHINE CODE MONITOR', 10, 13, 0
-	helpmsg2	db '(See the User Handbook for a quick guide)', 13, 10, 13, 10, 0
-	helpmsg3	db 'Enter instructions in hex, terminated by $ character', 10, 13, 0
-	helpmsg4	db 'Commands: r = re-run previous code, x = exit', 10, 13, 0
+	buffer		times 16 db 0
 
-	prompt		db '= ', 0
+	help_msg1	db 'MikeOS machine code tool', 10, 13, 0
+	help_msg2	db '(See the User Handbook for a quick guide)', 10, 13, 0
+	help_msg3	db 'Commands: i = input code, x = execute, d = dump RAM, p = poke byte, q = quit', 10, 13, 0
+	help_msg4	db 'Enter instructions in hex, terminated by $ character:', 10, 13, 0
+	dump_msg1	db 'Enter starting point in RAM (decimal): ', 0
+	dump_msg2	db 'Enter number of bytes to show: ', 0
+	poke_msg1	db 'Enter location in RAM (decimal): ', 0
+	poke_msg2	db 'Enter value to poke into this location (decimal): ', 0
+	quit_msg	db 'Quitting to MikeOS...', 10, 13, 0
+
+	main_prompt	db '> ', 0
+	code_prompt	db 'Code: ', 0
 
 
 ; ------------------------------------------------------------------

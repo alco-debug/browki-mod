@@ -1,6 +1,6 @@
 ; ==================================================================
 ; MikeOS -- The Mike Operating System kernel
-; Copyright (C) 2006 - 2019 MikeOS Developers -- see doc/LICENSE.TXT
+; Copyright (C) 2006 - 2021 MikeOS Developers -- see doc/LICENSE.TXT
 ;
 ; STRING MANIPULATION ROUTINES
 ; ==================================================================
@@ -681,6 +681,43 @@ os_long_int_to_string:
 .done:
 	popa
 	ret
+
+
+; ------------------------------------------------------------------
+; os_string_to_long_int -- Convert decimal string to integer value
+; IN: SI = string location (max 10 chars, up to '4294967295')
+; OUT: EAX = long unsigned number
+
+os_string_to_long_int:
+	pushad
+	mov ax, si			; First, get length of string
+	call os_string_length
+
+	mov cx, ax			; Use string length as counter
+
+	mov ebx, 0			; BX will be the final number (accumulator)
+	mov edi, 10			; Number base 10
+
+  .dloop:
+	xor eax, eax
+	lodsb				; Get character
+	cmp al, '0'			; Test validity
+	jb .finish
+	cmp al, '9'
+	ja .finish
+	sub al, '0'			; Convert from ASCII to real number
+	xchg eax, ebx			; Current total = last * 10 + this digit
+	mul edi
+	add ebx, eax
+	loop .dloop			; Repeat for each digit
+
+  .finish:
+	mov [.tmp], ebx
+	popad
+	mov eax, [.tmp]
+	ret
+
+	.tmp		dd 0
 
 
 ; ------------------------------------------------------------------

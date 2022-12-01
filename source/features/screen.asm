@@ -1,6 +1,6 @@
 ; ==================================================================
 ; MikeOS -- The Mike Operating System kernel
-; Copyright (C) 2006 - 2019 MikeOS Developers -- see doc/LICENSE.TXT
+; Copyright (C) 2006 - 2021 MikeOS Developers -- see doc/LICENSE.TXT
 ;
 ; SCREEN HANDLING SYSTEM CALLS
 ; ==================================================================
@@ -630,6 +630,7 @@ os_dump_registers:
 
 	call os_print_newline
 
+        push bp
 	push di
 	push si
 	push dx
@@ -665,6 +666,11 @@ os_dump_registers:
 	call os_print_string
 	call os_print_4hex
 
+        pop ax
+        mov si, .bp_string
+        call os_print_string
+        call os_print_4hex
+
 	call os_print_newline
 
 	popa
@@ -677,6 +683,7 @@ os_dump_registers:
 	.dx_string		db ' DX:', 0
 	.si_string		db ' SI:', 0
 	.di_string		db ' DI:', 0
+        .bp_string              db ' BP:', 0
 
 
 ; ------------------------------------------------------------------
@@ -688,7 +695,6 @@ os_input_dialog:
 
 	push ax				; Save string location
 	push bx				; Save message to show
-
 
 	mov dh, 10			; First, draw red background box
 	mov dl, 12

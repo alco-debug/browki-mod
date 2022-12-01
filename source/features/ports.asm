@@ -1,6 +1,6 @@
 ; ==================================================================
 ; MikeOS -- The Mike Operating System kernel
-; Copyright (C) 2006 - 2019 MikeOS Developers -- see doc/LICENSE.TXT
+; Copyright (C) 2006 - 2021 MikeOS Developers -- see doc/LICENSE.TXT
 ;
 ; PORT INPUT AND OUTPUT ROUTINES
 ; ==================================================================
@@ -40,9 +40,10 @@ os_port_byte_in:
 ; ------------------------------------------------------------------
 ; os_serial_port_enable -- Set up the serial port for transmitting data
 ; IN: AX = 0 for normal mode (9600 baud), or 1 for slow mode (1200 baud)
+; OUT: AH = line status, AL = modem status (see RBIL)
 
 os_serial_port_enable:
-	pusha
+	push dx
 
 	mov dx, 0			; Configure serial port 1
 	cmp ax, 1
@@ -59,7 +60,7 @@ os_serial_port_enable:
 .finish:
 	int 14h
 
-	popa
+	pop dx
 	ret
 
 
